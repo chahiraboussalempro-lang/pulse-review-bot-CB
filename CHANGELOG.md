@@ -5,6 +5,9 @@ Toute MR qui change un comportement public **doit** ajouter une entrée sous `[U
 
 ## [Unreleased]
 
+### Added
+- `util.clamp_score` : borne un score de priorité.
+
 ## [0.1.0] - 2026-06-01
 
 ### Added
