@@ -1,0 +1,23 @@
+# CI de BASE (fournie) — lint -> test -> build, SANS agent IA.
+# L'après-midi, vous ajoutez le workflow `ai-review.yml` (étape agentique sur PR)
+# + la branch protection (gate d'approbation humaine).
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet ruff pytest
+      - name: lint
+        run: ruff check .
+      - name: test
+        run: pytest -q
+      - name: build
+        run: python -m compileall services

@@ -1,0 +1,25 @@
+[project]
+name = "pulse-pipeline-seed"
+version = "0.1.0"
+description = "Mini-monorepo Pulse pour le lab CI/CD agentique (J9)"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["SOLUTION"]   # outillage formateur (agent IA), hors code audité
+
+[tool.ruff.lint]
+# E,F = pyflakes/pycodestyle ; I = imports ; B = bugbear.
+# PAS de règles sécurité (S/bandit) ici : le lint déterministe fait le style et les
+# bugs ; la SÉCURITÉ (secret en dur, SQLi) est laissée à l'étape AGENTIQUE. C'est tout
+# le récit du jour : un lint vert ne garantit pas un code sûr — l'agent fait la différence.
+select = ["E", "F", "I", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

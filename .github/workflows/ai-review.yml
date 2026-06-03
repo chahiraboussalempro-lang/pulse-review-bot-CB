@@ -1,0 +1,62 @@
+name: ai-review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Extract diff
+        run: |
+          git diff origin/main...HEAD > /tmp/pr.diff
+          echo "Diff size: $(wc -l < /tmp/pr.diff) lines"
+
+      - name: Run AI review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          bash review-pr.sh < /tmp/pr.diff > /tmp/findings.json
+          echo "Findings:"
+          cat /tmp/findings.json
+
+      - name: Post inline comments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 post-comments.py /tmp/findings.json
+
+      - name: Gate on critical findings
+        run: |
+          CRITICALS=$(python3 -c "
+          import json, sys
+          findings = json.load(open('/tmp/findings.json'))
+          count = sum(1 for f in findings if f.get('severity') == 'critical')
+          print(count)
+          ")
+          echo "Critical findings: $CRITICALS"
+          if [ "$CRITICALS" -gt 0 ]; then
+            echo "BLOCKED: $CRITICALS critical finding(s) detected."
+            exit 1
+          fi
+          echo "No critical findings — check passed."
