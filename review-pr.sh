@@ -2,14 +2,20 @@
 # review-pr.sh — reads a git diff on stdin, outputs a JSON findings array on stdout
 set -euo pipefail
 
-DIFF=$(cat)
+TMP_DIFF=$(mktemp)
+TMP_PROMPT=$(mktemp)
+trap 'rm -f "$TMP_DIFF" "$TMP_PROMPT"' EXIT
 
-if [ -z "$(echo "$DIFF" | tr -d '[:space:]')" ]; then
+cat > "$TMP_DIFF"
+
+if [ -z "$(cat "$TMP_DIFF" | tr -d '[:space:]')" ]; then
     echo "[]"
     exit 0
 fi
 
-PROMPT="You are a strict code reviewer agent. Analyze the git diff below on three axes:
+# Write prompt to file to avoid shell quoting issues with diff content
+cat > "$TMP_PROMPT" << 'PROMPT_EOF'
+You are a strict code reviewer agent. Analyze the git diff below on three axes:
 
 1. REVIEW — bugs, regressions, deleted or weakened tests added to make CI pass
 2. SECURITY — hardcoded secrets/API tokens/passwords, SQL injection via string concatenation, auth bypass
@@ -22,20 +28,21 @@ Severity rules:
 
 Output rules (MANDATORY):
 - Respond ONLY with a valid JSON array. No text before, no text after, no markdown fences.
-- Each finding: {\"file\": \"<path>\", \"line\": <integer>, \"severity\": \"critical|warning|info\", \"category\": \"review|security|changelog\", \"message\": \"<short description>\"}
+- Each finding: {"file": "<path>", "line": <integer>, "severity": "critical|warning|info", "category": "review|security|changelog", "message": "<short description>"}
 - If the diff is clean, respond with exactly: []
 - Do NOT invent findings. Be precise about file and line number. When in doubt, omit.
 - A false positive on a clean PR is a critical failure — precision over recall.
 
 Diff to analyze:
-$DIFF"
+PROMPT_EOF
 
-# Use API directly if key is set, otherwise fall back to claude -p (local dev)
+cat "$TMP_DIFF" >> "$TMP_PROMPT"
+
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    python3 - <<PYEOF
+    python3 - "$TMP_PROMPT" << 'PYEOF'
 import json, os, urllib.request, urllib.error, sys
 
-prompt = """$PROMPT"""
+prompt = open(sys.argv[1], encoding="utf-8", errors="replace").read()
 api_key = os.environ["ANTHROPIC_API_KEY"]
 
 payload = json.dumps({
@@ -70,5 +77,5 @@ for block in data.get("content", []):
 print("[]")
 PYEOF
 else
-    claude -p "$PROMPT"
+    claude -p "$(cat "$TMP_PROMPT")"
 fi
