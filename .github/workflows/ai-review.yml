@@ -16,6 +16,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Mask API key
+        run: echo "::add-mask::${{ secrets.ANTHROPIC_API_KEY }}"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -43,20 +46,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          python3 post-comments.py /tmp/findings.json
+        run: python3 post-comments.py /tmp/findings.json
 
-      - name: Gate on critical findings
+      - name: Gate — block on any finding (critical or warning)
         run: |
-          CRITICALS=$(python3 -c "
+          FINDINGS=$(python3 -c "
           import json, sys
           findings = json.load(open('/tmp/findings.json'))
-          count = sum(1 for f in findings if f.get('severity') == 'critical')
-          print(count)
+          flagged = [f for f in findings if f.get('severity') in ('critical', 'warning')]
+          print(len(flagged))
           ")
-          echo "Critical findings: $CRITICALS"
-          if [ "$CRITICALS" -gt 0 ]; then
-            echo "BLOCKED: $CRITICALS critical finding(s) detected."
+          echo "Flagged findings: $FINDINGS"
+          if [ "$FINDINGS" -gt 0 ]; then
+            echo "BLOCKED: $FINDINGS finding(s) require attention before merge."
             exit 1
           fi
-          echo "No critical findings — check passed."
+          echo "No findings — check passed."
