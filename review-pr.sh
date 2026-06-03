@@ -2,45 +2,41 @@
 # review-pr.sh — reads a git diff on stdin, outputs a JSON findings array on stdout
 set -euo pipefail
 
-TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
-cat > "$TMP"
+DIFF=$(cat)
 
-python3 - "$TMP" <<'PYEOF'
-import sys, json, os, urllib.request, urllib.error
+if [ -z "$(echo "$DIFF" | tr -d '[:space:]')" ]; then
+    echo "[]"
+    exit 0
+fi
 
-diff = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+PROMPT="You are a strict code reviewer agent. Analyze the git diff below on three axes:
 
-if not diff.strip():
-    print("[]")
-    sys.exit(0)
+1. REVIEW — bugs, regressions, deleted or weakened tests added to make CI pass
+2. SECURITY — hardcoded secrets/API tokens/passwords, SQL injection via string concatenation, auth bypass
+3. CHANGELOG — a public behavior was changed but no entry was added under ## [Unreleased] in CHANGELOG.md
 
-api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-if not api_key:
-    sys.exit("Error: ANTHROPIC_API_KEY is not set")
+Severity rules:
+- critical: hardcoded API token/secret, SQL injection via string concatenation, deleted test that covered a behavioral requirement
+- warning: debug print() or logging statement left in production code
+- info: minor style or changelog issue
 
-prompt = (
-    "You are a strict code reviewer agent. Analyze the git diff below on three axes:\n\n"
-    "1. REVIEW — bugs, regressions, deleted or weakened tests added to make CI pass\n"
-    "2. SECURITY — hardcoded secrets/API tokens/passwords, SQL injection via string "
-    "concatenation, auth bypass\n"
-    "3. CHANGELOG — a public behavior was changed but no entry was added under "
-    "## [Unreleased] in CHANGELOG.md\n\n"
-    "Severity rules:\n"
-    "- critical: hardcoded API token/secret, SQL injection via string concatenation, "
-    "deleted test that covered a behavioral requirement\n"
-    "- warning: debug print() or logging statement left in production code\n"
-    "- info: minor style or changelog issue\n\n"
-    "Output rules (MANDATORY):\n"
-    "- Respond ONLY with a valid JSON array. No text before, no text after, no markdown fences.\n"
-    '- Each finding: {"file": "<path>", "line": <integer>, "severity": "critical|warning|info", '
-    '"category": "review|security|changelog", "message": "<short description>"}\n'
-    "- If the diff is clean, respond with exactly: []\n"
-    "- Do NOT invent findings. Be precise about file and line number. When in doubt, omit.\n"
-    "- A false positive on a clean PR is a critical failure — precision over recall.\n\n"
-    "Diff to analyze:\n"
-    + diff[:50000]
-)
+Output rules (MANDATORY):
+- Respond ONLY with a valid JSON array. No text before, no text after, no markdown fences.
+- Each finding: {\"file\": \"<path>\", \"line\": <integer>, \"severity\": \"critical|warning|info\", \"category\": \"review|security|changelog\", \"message\": \"<short description>\"}
+- If the diff is clean, respond with exactly: []
+- Do NOT invent findings. Be precise about file and line number. When in doubt, omit.
+- A false positive on a clean PR is a critical failure — precision over recall.
+
+Diff to analyze:
+$DIFF"
+
+# Use API directly if key is set, otherwise fall back to claude -p (local dev)
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    python3 - <<PYEOF
+import json, os, urllib.request, urllib.error, sys
+
+prompt = """$PROMPT"""
+api_key = os.environ["ANTHROPIC_API_KEY"]
 
 payload = json.dumps({
     "model": "claude-haiku-4-5-20251001",
@@ -67,10 +63,12 @@ except urllib.error.HTTPError as e:
 for block in data.get("content", []):
     if block.get("type") == "text":
         text = block["text"].strip()
-        # validate JSON before printing
         parsed = json.loads(text)
         print(json.dumps(parsed, ensure_ascii=False))
         sys.exit(0)
 
 print("[]")
 PYEOF
+else
+    claude -p "$PROMPT"
+fi
