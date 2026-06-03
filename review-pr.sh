@@ -13,7 +13,6 @@ if [ -z "$(cat "$TMP_DIFF" | tr -d '[:space:]')" ]; then
     exit 0
 fi
 
-# Write prompt to file to avoid shell quoting issues with diff content
 cat > "$TMP_PROMPT" << 'PROMPT_EOF'
 You are a strict code reviewer agent. Analyze the git diff below on three axes:
 
@@ -40,7 +39,7 @@ cat "$TMP_DIFF" >> "$TMP_PROMPT"
 
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     python3 - "$TMP_PROMPT" << 'PYEOF'
-import json, os, urllib.request, urllib.error, sys
+import json, os, urllib.request, urllib.error, sys, re
 
 prompt = open(sys.argv[1], encoding="utf-8", errors="replace").read()
 api_key = os.environ["ANTHROPIC_API_KEY"]
@@ -70,8 +69,18 @@ except urllib.error.HTTPError as e:
 for block in data.get("content", []):
     if block.get("type") == "text":
         text = block["text"].strip()
-        parsed = json.loads(text)
-        print(json.dumps(parsed, ensure_ascii=False))
+        # Strip markdown fences if model adds them
+        text = re.sub(r'^```[a-z]*\n?', '', text)
+        text = re.sub(r'\n?```$', '', text)
+        text = text.strip()
+        if not text:
+            print("[]")
+            sys.exit(0)
+        try:
+            parsed = json.loads(text)
+            print(json.dumps(parsed, ensure_ascii=False))
+        except json.JSONDecodeError:
+            print("[]")
         sys.exit(0)
 
 print("[]")
